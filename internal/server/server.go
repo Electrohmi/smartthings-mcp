@@ -7,8 +7,10 @@ import (
 	"github.com/langowarny/smartthings-mcp/internal/smartthings"
 )
 
-// NewMCPServer creates and initializes a new MCP server.
-func NewMCPServer(logger *zap.SugaredLogger, client *smartthings.Client) *mcp.Server {
+// NewMCPServer creates and initializes a new MCP server. defaultLocationID,
+// when non-empty, restricts all tools/resources to that single SmartThings
+// location.
+func NewMCPServer(logger *zap.SugaredLogger, client *smartthings.Client, defaultLocationID string) *mcp.Server {
 	// Initialize the server implementation info
 	impl := &mcp.Implementation{
 		Name:    "SmartThings MCP",
@@ -23,10 +25,10 @@ func NewMCPServer(logger *zap.SugaredLogger, client *smartthings.Client) *mcp.Se
 	})
 
 	// Register tools
-	RegisterTools(s, client)
+	RegisterTools(s, client, defaultLocationID)
 
 	// Register resources
-	RegisterResources(s, client)
+	RegisterResources(s, client, defaultLocationID)
 
 	// Register prompts
 	RegisterPrompts(s)

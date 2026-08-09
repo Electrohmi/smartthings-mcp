@@ -10,3 +10,4 @@ services:
       MCP_ACCESS_TOKEN: "${MCP_ACCESS_TOKEN:?Shared secret required to reach the endpoint - generate one with `openssl rand -hex 32`}"
       # ST_BASE_URL: "https://api.smartthings.com"
       # MCP_LOG_LEVEL: "info"
+      # SMARTTHINGS_LOCATION_ID: "f607eac4-1336-4eae-9c75-1b8ae24e5e31"

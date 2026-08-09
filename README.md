@@ -46,6 +46,7 @@ LLM-friendly tools, resources and real-time events.
 | `smartThingsToken`, `SMARTTHINGS_TOKEN` | – | Bearer token for SmartThings API. **Required for SmartThings operations**, but server will start without it for tool discovery |
 | `stBaseUrl`, `ST_BASE_URL` | `https://api.smartthings.com` | Override for testing / mock servers |
 | `MCP_ACCESS_TOKEN` | – | Shared secret that gates the **SSE**/**StreamableHTTP** endpoints. If set, every request must supply it via the `mcpAccessToken` query parameter or an `Authorization: Bearer` header, or it's rejected with `401`. **Strongly recommended whenever the server is reachable from outside your LAN** — without it, anyone who can reach the URL can control your devices using the token baked into the container. Not used by `stdio`. |
+| `SMARTTHINGS_LOCATION_ID` | – | Restricts every tool and resource to a single SmartThings location (find IDs via `list_locations`). If your account has multiple homes, set this so the server can only see/control devices, scenes, and rooms in that one location — `list_locations` itself only returns the configured location, and any device/scene/room ID outside it is rejected. Fixed server-side config only; it cannot be overridden via a request, even on `sse`/`stream`. |
 | `MCP_LOG_LEVEL` | `info` | `debug` | `info` | `warn` | `error` |
 
 ## Installation
@@ -122,6 +123,39 @@ To run the server on a Synology NAS via **Container Manager** (DSM 7.2+), pullin
 
 Alternatively, from an SSH session on the NAS you can run the same `docker pull` / `docker run` commands shown
 above, or `docker compose up -d` using the provided `docker-compose.yml`.
+
+#### Troubleshooting: tools fail with a DNS/lookup or connection-timeout error
+
+If tool calls fail with something like
+`dial tcp: lookup api.smartthings.com on 127.0.0.11:53: ... i/o timeout` (or the container has no
+`eth0` at all in `docker exec smartthings-mcp ip addr show`), the actual cause on Synology is
+usually **DSM's built-in firewall (Control Panel → Security → Firewall) not allowing the Docker
+project's private subnet**, not a block on the SmartThings domain itself.
+
+Each `docker compose` project gets its own auto-generated bridge network (e.g.
+`smartthings-mcp_default`) with a subnet Docker picks from its `192.168.0.0/16` pool — and that
+subnet can change every time the network is recreated (container/NAS restart, `docker compose
+down && up`, etc.). If DSM's firewall profile only allows specific subnets (commonly added ad hoc
+per Docker project over time), a newly-allocated subnet that isn't on the list gets silently
+dropped before it ever reaches the internet.
+
+**Fix**: in DSM, Control Panel → Security → Firewall → edit your profile → **Create** a rule
+allowing the whole Docker private range instead of one-off subnets:
+- Port: All
+- Protocol: All
+- Source IP: `192.168.0.0`, subnet mask `255.255.0.0`
+- Action: Allow
+
+Move it above any catch-all deny rule and apply. This covers every subnet Docker could ever
+allocate in that pool, so it won't need to be re-added when a project's network gets recreated.
+
+To confirm the container's network endpoint itself is healthy (separate from the firewall issue),
+fully recreate it rather than just restarting the container:
+```bash
+sudo docker compose down && sudo docker compose up -d
+sudo docker exec smartthings-mcp ip addr show          # should show eth0 with a 192.168.x.x address
+sudo docker exec smartthings-mcp nslookup api.smartthings.com
+```
 
 ## Running
 

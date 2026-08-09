@@ -38,6 +38,7 @@ func NewClient(token, baseURL string) *Client {
 // Device represents SmartThings device metadata.
 type Device struct {
 	DeviceID   string `json:"deviceId"`
+	LocationID string `json:"locationId"`
 	Name       string `json:"name"`
 	Label      string `json:"label"`
 	DeviceType string `json:"deviceTypeName"`
@@ -202,12 +203,16 @@ type Rule struct {
 	// Additional fields like actions can be added if needed, keeping it simple for now.
 }
 
-// ListRules returns rules.
-func (c *Client) ListRules() ([]Rule, error) {
+// ListRules returns rules, optionally filtered to a single location.
+func (c *Client) ListRules(locationID string) ([]Rule, error) {
 	var resp struct {
 		Items []Rule `json:"items"`
 	}
-	if err := c.get("/v1/rules", &resp); err != nil {
+	path := "/v1/rules"
+	if locationID != "" {
+		path += "?locationId=" + locationID
+	}
+	if err := c.get(path, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Items, nil

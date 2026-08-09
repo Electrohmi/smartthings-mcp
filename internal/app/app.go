@@ -27,6 +27,7 @@ type Config struct {
 	Token       string
 	BaseURL     string
 	AccessToken string
+	LocationID  string
 }
 
 type Application struct {
@@ -86,7 +87,7 @@ func (a *Application) Start() error {
 	stClient := smartthings.NewClient(a.cfg.Token, a.cfg.BaseURL)
 
 	// Initialize MCP Server
-	s := srv.NewMCPServer(a.logger, stClient)
+	s := srv.NewMCPServer(a.logger, stClient, a.cfg.LocationID)
 	a.server = s
 
 	// Handle Transport
@@ -138,8 +139,10 @@ func (a *Application) Start() error {
 			// Initialize SmartThings Client for this session
 			stClient := smartthings.NewClient(token, baseURL)
 
-			// Initialize MCP Server for this session
-			return srv.NewMCPServer(a.logger, stClient)
+			// Initialize MCP Server for this session. LocationID is intentionally
+			// fixed server-side config only (not overridable via query params),
+			// so the single-location scoping can't be bypassed by a caller.
+			return srv.NewMCPServer(a.logger, stClient, a.cfg.LocationID)
 		}, nil)
 
 		mux := http.NewServeMux()
@@ -204,8 +207,10 @@ func (a *Application) Start() error {
 			// Initialize SmartThings Client for this session
 			stClient := smartthings.NewClient(token, baseURL)
 
-			// Initialize MCP Server for this session
-			return srv.NewMCPServer(a.logger, stClient)
+			// Initialize MCP Server for this session. LocationID is intentionally
+			// fixed server-side config only (not overridable via query params),
+			// so the single-location scoping can't be bypassed by a caller.
+			return srv.NewMCPServer(a.logger, stClient, a.cfg.LocationID)
 		}, nil)
 
 		authHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

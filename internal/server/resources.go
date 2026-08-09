@@ -13,8 +13,9 @@ import (
 )
 
 // RegisterResources registers SmartThings resources (devices, status, locations)
-// and wires them into the MCP server.
-func RegisterResources(s *mcp.Server, client *smartthings.Client) {
+// and wires them into the MCP server. defaultLocationID, when non-empty,
+// applies the same single-location scoping as RegisterTools.
+func RegisterResources(s *mcp.Server, client *smartthings.Client, defaultLocationID string) {
 	const mimeJSON = "application/json"
 
 	// Simple cache keyed by URI → cacheEntry
@@ -74,6 +75,9 @@ func RegisterResources(s *mcp.Server, client *smartthings.Client) {
 		if err != nil {
 			return nil, err
 		}
+		if defaultLocationID != "" && d.LocationID != defaultLocationID {
+			return nil, fmt.Errorf("access denied: device is outside the configured SmartThings location")
+		}
 		bytes, _ := json.Marshal(d)
 		jsonText := string(bytes)
 		putCache(uri, jsonText)
@@ -94,6 +98,9 @@ func RegisterResources(s *mcp.Server, client *smartthings.Client) {
 
 		deviceID, err := extractDeviceID(uri)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkDeviceLocation(client, defaultLocationID, deviceID); err != nil {
 			return nil, err
 		}
 		status, err := client.GetDeviceStatus(deviceID)
@@ -122,6 +129,9 @@ func RegisterResources(s *mcp.Server, client *smartthings.Client) {
 		if err != nil {
 			return nil, err
 		}
+		if defaultLocationID != "" && locID != defaultLocationID {
+			return nil, fmt.Errorf("access denied: this server is scoped to a single SmartThings location")
+		}
 		loc, err := client.GetLocation(locID)
 		if err != nil {
 			return nil, err
@@ -144,9 +154,19 @@ func RegisterResources(s *mcp.Server, client *smartthings.Client) {
 			return &mcp.ReadResourceResult{Contents: wrap(uri, cached)}, nil
 		}
 
-		locs, err := client.ListLocations()
-		if err != nil {
-			return nil, err
+		var locs []smartthings.Location
+		if defaultLocationID != "" {
+			loc, err := client.GetLocation(defaultLocationID)
+			if err != nil {
+				return nil, err
+			}
+			locs = []smartthings.Location{*loc}
+		} else {
+			var err error
+			locs, err = client.ListLocations()
+			if err != nil {
+				return nil, err
+			}
 		}
 		bytes, _ := json.Marshal(locs)
 		jsonText := string(bytes)

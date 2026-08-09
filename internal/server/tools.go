@@ -10,7 +10,10 @@ import (
 )
 
 // RegisterTools registers SmartThings tools with MCP server.
-func RegisterTools(s *mcp.Server, client *smartthings.Client) {
+// defaultLocationID, when non-empty, restricts every tool to that single
+// SmartThings location: other locations are hidden from list_locations and
+// any attempt to read or command a device/scene/room outside it is rejected.
+func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID string) {
 	// list_devices
 	s.AddTool(&mcp.Tool{
 		Name:        "list_devices",
@@ -30,9 +33,12 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 			return errorResult("invalid arguments"), nil
 		}
 		loc, _ := args["location_id"].(string)
+		loc, err := resolveLocation(loc, defaultLocationID)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
 
 		var devices []smartthings.Device
-		var err error
 		if loc != "" {
 			devices, err = client.ListDevicesByLocation(loc)
 		} else {
@@ -89,6 +95,9 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}
+		if defaultLocationID != "" && d.LocationID != defaultLocationID {
+			return errorResult("access denied: device is outside the configured SmartThings location"), nil
+		}
 		data, _ := json.Marshal(d)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -125,6 +134,9 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		id, ok := args["device_id"].(string)
 		if !ok {
 			return errorResult("device_id is required"), nil
+		}
+		if err := checkDeviceLocation(client, defaultLocationID, id); err != nil {
+			return errorResult(err.Error()), nil
 		}
 		status, err := client.GetDeviceStatus(id)
 		if err != nil {
@@ -170,6 +182,9 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		dev, err := client.GetDevice(id)
 		if err != nil {
 			return errorResult(err.Error()), nil
+		}
+		if defaultLocationID != "" && dev.LocationID != defaultLocationID {
+			return errorResult("access denied: device is outside the configured SmartThings location"), nil
 		}
 		capSet := make(map[string]struct{})
 		for _, comp := range dev.Components {
@@ -239,6 +254,10 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		command, _ := args["command"].(string)
 		arguments, _ := args["arguments"].([]interface{})
 
+		if err := checkDeviceLocation(client, defaultLocationID, id); err != nil {
+			return errorResult(err.Error()), nil
+		}
+
 		body := map[string]interface{}{
 			"commands": []interface{}{
 				map[string]interface{}{
@@ -273,9 +292,19 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 			"type": "object",
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		locs, err := client.ListLocations()
-		if err != nil {
-			return errorResult(err.Error()), nil
+		var locs []smartthings.Location
+		if defaultLocationID != "" {
+			loc, err := client.GetLocation(defaultLocationID)
+			if err != nil {
+				return errorResult(err.Error()), nil
+			}
+			locs = []smartthings.Location{*loc}
+		} else {
+			var err error
+			locs, err = client.ListLocations()
+			if err != nil {
+				return errorResult(err.Error()), nil
+			}
 		}
 		data, _ := json.Marshal(locs)
 		return &mcp.CallToolResult{
@@ -311,6 +340,22 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 			return errorResult("invalid arguments"), nil
 		}
 		sceneID, _ := args["scene_id"].(string)
+		if defaultLocationID != "" {
+			scenes, err := client.ListScenes()
+			if err != nil {
+				return errorResult(err.Error()), nil
+			}
+			found := false
+			for _, sc := range scenes {
+				if sc.SceneID == sceneID && sc.LocationID == defaultLocationID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return errorResult("access denied: scene is outside the configured SmartThings location"), nil
+			}
+		}
 		resp, err := client.ExecuteScene(sceneID)
 		if err != nil {
 			return errorResult(err.Error()), nil
@@ -340,6 +385,15 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		scenes, err := client.ListScenes()
 		if err != nil {
 			return errorResult(err.Error()), nil
+		}
+		if defaultLocationID != "" {
+			filtered := make([]smartthings.Scene, 0, len(scenes))
+			for _, sc := range scenes {
+				if sc.LocationID == defaultLocationID {
+					filtered = append(filtered, sc)
+				}
+			}
+			scenes = filtered
 		}
 		data, _ := json.Marshal(scenes)
 		return &mcp.CallToolResult{
@@ -375,6 +429,10 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 			return errorResult("invalid arguments"), nil
 		}
 		locID, _ := args["location_id"].(string)
+		locID, err := resolveLocation(locID, defaultLocationID)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
 		if locID == "" {
 			return errorResult("location_id is required"), nil
 		}
@@ -421,6 +479,10 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		}
 		locID, _ := args["location_id"].(string)
 		name, _ := args["name"].(string)
+		locID, err := resolveLocation(locID, defaultLocationID)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
 		if locID == "" || name == "" {
 			return errorResult("location_id and name are required"), nil
 		}
@@ -467,6 +529,10 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		}
 		locID, _ := args["location_id"].(string)
 		roomID, _ := args["room_id"].(string)
+		locID, err := resolveLocation(locID, defaultLocationID)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
 		if locID == "" || roomID == "" {
 			return errorResult("location_id and room_id are required"), nil
 		}
@@ -494,7 +560,7 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 			"type": "object",
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		rules, err := client.ListRules()
+		rules, err := client.ListRules(defaultLocationID)
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}
@@ -871,6 +937,9 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		if deviceID == "" {
 			return errorResult("device_id is required"), nil
 		}
+		if err := checkDeviceLocation(client, defaultLocationID, deviceID); err != nil {
+			return errorResult(err.Error()), nil
+		}
 		history, err := client.GetDeviceHistory(deviceID)
 		if err != nil {
 			return errorResult(err.Error()), nil
@@ -919,6 +988,38 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client) {
 		data, _ := json.Marshal(capDef)
 		return successResult(string(data)), nil
 	})
+}
+
+// resolveLocation validates a caller-supplied location_id against the
+// server's configured default location. If no default is configured, the
+// caller-supplied value passes through unchanged (including empty, meaning
+// "all locations" where the tool supports that). If a default is
+// configured, an empty caller value resolves to the default, and any other
+// value must match it exactly.
+func resolveLocation(provided, configured string) (string, error) {
+	if configured == "" {
+		return provided, nil
+	}
+	if provided != "" && provided != configured {
+		return "", fmt.Errorf("access denied: this server is scoped to a single SmartThings location")
+	}
+	return configured, nil
+}
+
+// checkDeviceLocation fetches the device and rejects it if it falls outside
+// the configured default location. It is a no-op when no default is set.
+func checkDeviceLocation(client *smartthings.Client, configured, deviceID string) error {
+	if configured == "" {
+		return nil
+	}
+	dev, err := client.GetDevice(deviceID)
+	if err != nil {
+		return err
+	}
+	if dev.LocationID != configured {
+		return fmt.Errorf("access denied: device is outside the configured SmartThings location")
+	}
+	return nil
 }
 
 func successResult(text string) *mcp.CallToolResult {
