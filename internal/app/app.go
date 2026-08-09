@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,11 +21,12 @@ import (
 )
 
 type Config struct {
-	Transport string
-	Host      string
-	Port      int
-	Token     string
-	BaseURL   string
+	Transport   string
+	Host        string
+	Port        int
+	Token       string
+	BaseURL     string
+	AccessToken string
 }
 
 type Application struct {
@@ -56,6 +59,26 @@ func NewApplication(cfg Config) (*Application, error) {
 	}, nil
 }
 
+// isAuthorized checks the request against the configured MCP access token.
+// The token may be supplied as the "mcpAccessToken" query parameter (useful
+// when registering a remote connector URL, e.g. with Claude, which does not
+// let you attach custom headers) or as an "Authorization: Bearer" header.
+// If no access token is configured, every request is allowed.
+func isAuthorized(r *http.Request, expected string) bool {
+	if expected == "" {
+		return true
+	}
+
+	provided := r.URL.Query().Get("mcpAccessToken")
+	if provided == "" {
+		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			provided = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
 func (a *Application) Start() error {
 	a.logger.Info("Starting SmartThings MCP Server...")
 
@@ -86,6 +109,9 @@ func (a *Application) Start() error {
 		}
 		addr := fmt.Sprintf("%s:%d", a.cfg.Host, port)
 		a.logger.Infof("Starting SSE server on %s", addr)
+		if a.cfg.AccessToken == "" {
+			a.logger.Warn("MCP_ACCESS_TOKEN is not set; the HTTP endpoint is unauthenticated and reachable by anyone who can hit it.")
+		}
 
 		sseHandler := mcp.NewSSEHandler(func(r *http.Request) *mcp.Server {
 			// Parse configuration from query parameters
@@ -132,6 +158,11 @@ func (a *Application) Start() error {
 				return
 			}
 
+			if !isAuthorized(r, a.cfg.AccessToken) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+
 			mux.ServeHTTP(w, r)
 		})
 
@@ -149,6 +180,10 @@ func (a *Application) Start() error {
 	case "stream":
 		addr := fmt.Sprintf("%s:%d", a.cfg.Host, a.cfg.Port)
 		a.logger.Infof("Starting Stream server on %s", addr)
+		if a.cfg.AccessToken == "" {
+			a.logger.Warn("MCP_ACCESS_TOKEN is not set; the HTTP endpoint is unauthenticated and reachable by anyone who can hit it.")
+		}
+
 		streamHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 			// Parse configuration from query parameters
 			token := r.URL.Query().Get("smartThingsToken")
@@ -173,9 +208,17 @@ func (a *Application) Start() error {
 			return srv.NewMCPServer(a.logger, stClient)
 		}, nil)
 
+		authHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !isAuthorized(r, a.cfg.AccessToken) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			streamHandler.ServeHTTP(w, r)
+		})
+
 		a.httpServer = &http.Server{
 			Addr:    addr,
-			Handler: streamHandler,
+			Handler: authHandler,
 		}
 
 		go func() {

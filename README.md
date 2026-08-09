@@ -45,6 +45,7 @@ LLM-friendly tools, resources and real-time events.
 |------|---------|-------------|
 | `smartThingsToken`, `SMARTTHINGS_TOKEN` | – | Bearer token for SmartThings API. **Required for SmartThings operations**, but server will start without it for tool discovery |
 | `stBaseUrl`, `ST_BASE_URL` | `https://api.smartthings.com` | Override for testing / mock servers |
+| `MCP_ACCESS_TOKEN` | – | Shared secret that gates the **SSE**/**StreamableHTTP** endpoints. If set, every request must supply it via the `mcpAccessToken` query parameter or an `Authorization: Bearer` header, or it's rejected with `401`. **Strongly recommended whenever the server is reachable from outside your LAN** — without it, anyone who can reach the URL can control your devices using the token baked into the container. Not used by `stdio`. |
 | `MCP_LOG_LEVEL` | `info` | `debug` | `info` | `warn` | `error` |
 
 ## Installation
@@ -80,9 +81,16 @@ docker pull ghcr.io/electrohmi/smartthings-mcp:latest
 docker run -d --name smartthings-mcp \
   -p 8081:8081 \
   -e SMARTTHINGS_TOKEN=123ab456-xxx... \
+  -e MCP_ACCESS_TOKEN=$(openssl rand -hex 32) \
   --restart unless-stopped \
   ghcr.io/electrohmi/smartthings-mcp:latest
 ```
+
+> **If this port/domain is reachable from outside your LAN, always set `MCP_ACCESS_TOKEN`.**
+> Without it, the SSE/StreamableHTTP endpoints accept unauthenticated requests and execute
+> them using the `SMARTTHINGS_TOKEN` baked into the container — anyone with the URL could
+> control your devices. See [Environment Variables](#environment-variables) and the Synology
+> section below for how to wire the token through to Claude.
 
 ### Synology NAS (Container Manager)
 
@@ -94,10 +102,23 @@ To run the server on a Synology NAS via **Container Manager** (DSM 7.2+), pullin
    [PAT with `read:packages` scope](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry) as the password.
 2. **Container Manager → Project**: create a new project, choose *Upload docker-compose.yml*, and upload the
    [`docker-compose.yml`](docker-compose.yml) from this repo (or paste its contents).
-3. Set the `SMARTTHINGS_TOKEN` environment variable (Container Manager project *Environment* tab, or a `.env`
-   file next to `docker-compose.yml` with `SMARTTHINGS_TOKEN=123ab456-xxx...`), then build/start the project.
-4. The server listens on port `8081` (StreamableHTTP transport) — point your MCP client at
-   `http://<synology-ip>:8081/mcp`.
+3. Set `SMARTTHINGS_TOKEN` and `MCP_ACCESS_TOKEN` (Container Manager project *Environment* tab, or a `.env`
+   file next to `docker-compose.yml`):
+   ```
+   SMARTTHINGS_TOKEN=123ab456-xxx...
+   MCP_ACCESS_TOKEN=<a long random secret, e.g. output of `openssl rand -hex 32`>
+   ```
+   then build/start the project.
+4. The server listens on port `8081` (StreamableHTTP transport). Behind a reverse proxy
+   (e.g. `https://electrohmi.synology.me/smartthings/`), your MCP client must hit the exact
+   proxied URL with `MCP_ACCESS_TOKEN` appended as a query parameter:
+   ```
+   https://electrohmi.synology.me/smartthings/?mcpAccessToken=<your MCP_ACCESS_TOKEN>
+   ```
+   This is required because Claude's custom connector UI doesn't support attaching a static
+   header/API key — the token has to travel in the URL itself. Requests missing or with an
+   incorrect token get `401 Unauthorized`; without `MCP_ACCESS_TOKEN` configured at all, the
+   endpoint stays open to anyone who can reach it.
 
 Alternatively, from an SSH session on the NAS you can run the same `docker pull` / `docker run` commands shown
 above, or `docker compose up -d` using the provided `docker-compose.yml`.
