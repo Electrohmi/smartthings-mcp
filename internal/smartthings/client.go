@@ -49,6 +49,13 @@ type Device struct {
 			ID      string `json:"id"`
 			Version int    `json:"version"`
 		} `json:"capabilities"`
+		// Categories classify what a component actually is (e.g. "Light",
+		// "SmartPlug", "Thermostat") and are a far more reliable filter for
+		// "what kind of device is this" than capability IDs — capabilities
+		// like "switch" are shared by lights, plugs, and many appliances.
+		Categories []struct {
+			Name string `json:"name"`
+		} `json:"categories,omitempty"`
 	} `json:"components,omitempty"`
 }
 

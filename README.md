@@ -197,7 +197,7 @@ The server emits `smartthings/device_status` notifications every 30 seconds.
 | Tool | Params | Description |
 |------|--------|-------------|
 | `list_devices` | `location_id?` | List user devices |
-| `list_devices_with_status` | `location_id?` | List devices with live status, fetched in parallel — use this instead of `list_devices` + `get_device_status` per device when asking about many devices at once (e.g. "what lights are on"); one round trip instead of one per device |
+| `list_devices_with_status` | `location_id?`, `category?`, `capability?` | List devices with live status, fetched in parallel — use this instead of `list_devices` + `get_device_status` per device when asking about many devices at once (e.g. "what lights are on"); one round trip instead of one per device. Filter with `category` (e.g. `Light`) whenever you only care about one kind of device — on accounts with many devices/complex appliances, an unfiltered call can return a very large response |
 | `get_device` | `device_id` | Device metadata |
 | `get_device_status` | `device_id` | Live status |
 | `list_device_capabilities` | `device_id` | Supported capabilities |

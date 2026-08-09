@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/langowarny/smartthings-mcp/internal/smartthings"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -74,13 +75,24 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		Name: "list_devices_with_status",
 		Description: "List SmartThings devices together with their live status, fetched in parallel server-side. " +
 			"Prefer this over list_devices + get_device_status per device when you need the status of many devices " +
-			"(e.g. 'what lights are on') — it's one round trip instead of one per device.",
+			"(e.g. 'what lights are on') — it's one round trip instead of one per device. Pass 'category' (and/or " +
+			"'capability') to narrow which devices are included whenever you only care about one kind of device — " +
+			"on accounts with many devices or complex appliances, fetching status for everything is slow and can " +
+			"produce a very large response.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"location_id": map[string]interface{}{
 					"type":        "string",
 					"description": "Optional location ID to filter devices. If not provided, returns devices from all locations.",
+				},
+				"category": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional device category to filter by (e.g. 'Light', 'SmartPlug', 'Thermostat', 'AirConditioner'). Prefer this over 'capability' when you're looking for a kind of device — capabilities like 'switch' are shared by lights, plugs, and many appliances (a fridge/washer/AC can all declare 'switch' on some component), so it over-matches. Case-insensitive.",
+				},
+				"capability": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional capability ID to filter devices by (e.g. 'switch', 'switchLevel', 'thermostatMode'). Combined with 'category' if both are given. Prefer 'category' alone when you just want 'devices of kind X' — it's more precise.",
 				},
 			},
 		},
@@ -94,6 +106,8 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}
+		capability, _ := args["capability"].(string)
+		category, _ := args["category"].(string)
 
 		var devices []smartthings.Device
 		if loc != "" {
@@ -106,20 +120,45 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		}
 		locCache.setMany(devices)
 
+		if capability != "" || category != "" {
+			filtered := devices[:0:0]
+			for _, d := range devices {
+				if (capability == "" || deviceHasCapability(d, capability)) &&
+					(category == "" || deviceHasCategory(d, category)) {
+					filtered = append(filtered, d)
+				}
+			}
+			devices = filtered
+		}
+
 		ids := make([]string, len(devices))
 		for i, d := range devices {
 			ids[i] = d.DeviceID
 		}
 		statuses, statusErrs := client.GetDevicesStatusConcurrent(ids, 8)
 
+		// Deliberately omits the full capability/component list (see Device):
+		// for accounts with complex appliances that alone can run tens of KB
+		// per device, and it's rarely needed alongside status. Use get_device
+		// or list_device_capabilities for that.
 		type deviceWithStatus struct {
-			smartthings.Device
+			DeviceID    string                   `json:"deviceId"`
+			LocationID  string                   `json:"locationId"`
+			Name        string                   `json:"name"`
+			Label       string                   `json:"label"`
+			DeviceType  string                   `json:"deviceTypeName"`
 			Status      smartthings.DeviceStatus `json:"status,omitempty"`
 			StatusError string                   `json:"statusError,omitempty"`
 		}
 		out := make([]deviceWithStatus, len(devices))
 		for i, d := range devices {
-			dws := deviceWithStatus{Device: d}
+			dws := deviceWithStatus{
+				DeviceID:   d.DeviceID,
+				LocationID: d.LocationID,
+				Name:       d.Name,
+				Label:      d.Label,
+				DeviceType: d.DeviceType,
+			}
 			if st, ok := statuses[d.DeviceID]; ok {
 				dws.Status = st
 			} else if statusErr, ok := statusErrs[d.DeviceID]; ok {
@@ -1064,6 +1103,32 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		data, _ := json.Marshal(capDef)
 		return successResult(string(data)), nil
 	})
+}
+
+// deviceHasCapability reports whether any component of the device declares
+// the given capability ID.
+func deviceHasCapability(d smartthings.Device, capability string) bool {
+	for _, comp := range d.Components {
+		for _, cap := range comp.Capabilities {
+			if cap.ID == capability {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// deviceHasCategory reports whether any component of the device is
+// classified under the given category name (case-insensitive).
+func deviceHasCategory(d smartthings.Device, category string) bool {
+	for _, comp := range d.Components {
+		for _, cat := range comp.Categories {
+			if strings.EqualFold(cat.Name, category) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resolveLocation validates a caller-supplied location_id against the
