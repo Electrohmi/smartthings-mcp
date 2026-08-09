@@ -123,6 +123,22 @@ To run the server on a Synology NAS via **Container Manager** (DSM 7.2+), pullin
 Alternatively, from an SSH session on the NAS you can run the same `docker pull` / `docker run` commands shown
 above, or `docker compose up -d` using the provided `docker-compose.yml`.
 
+#### Troubleshooting: tools fail with a DNS/lookup error
+
+If tool calls fail with something like
+`dial tcp: lookup api.smartthings.com on 127.0.0.11:53: ... i/o timeout`, the NAS host itself has
+working DNS but the container's requests to Docker's embedded DNS proxy (`127.0.0.11`) are timing
+out — a known Synology Container Manager quirk, not a firewall block on `api.smartthings.com`
+itself. Verify with:
+```bash
+nslookup api.smartthings.com                              # on the NAS host — should work
+sudo docker exec smartthings-mcp cat /etc/resolv.conf      # should show "nameserver 127.0.0.11"
+sudo docker exec smartthings-mcp nslookup api.smartthings.com   # fails if this bug is hit
+```
+Try restarting Container Manager first (`sudo synoservicectl --restart pkgctl-ContainerManager`).
+`docker-compose.yml` also pins explicit public DNS servers (`dns: [1.1.1.1, 8.8.8.8]`) so the
+container bypasses the embedded proxy entirely and this shouldn't recur.
+
 ## Running
 
 ### Stdio

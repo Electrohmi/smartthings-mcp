@@ -5,6 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "8081:8081"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       SMARTTHINGS_TOKEN: "${SMARTTHINGS_TOKEN:?SmartThings PAT is required}"
       MCP_ACCESS_TOKEN: "${MCP_ACCESS_TOKEN:?Shared secret required to reach the endpoint - generate one with `openssl rand -hex 32`}"
