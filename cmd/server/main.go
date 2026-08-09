@@ -18,11 +18,12 @@ func main() {
 	flag.Parse()
 
 	cfg := app.Config{
-		Transport: transport,
-		Host:      host,
-		Port:      port,
-		Token:     os.Getenv("SMARTTHINGS_TOKEN"),
-		BaseURL:   os.Getenv("ST_BASE_URL"),
+		Transport:   transport,
+		Host:        host,
+		Port:        port,
+		Token:       os.Getenv("SMARTTHINGS_TOKEN"),
+		BaseURL:     os.Getenv("ST_BASE_URL"),
+		AccessToken: os.Getenv("MCP_ACCESS_TOKEN"),
 	}
 
 	application, err := app.NewApplication(cfg)
