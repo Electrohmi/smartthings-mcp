@@ -5,6 +5,8 @@
 A **Model Context Protocol (MCP)** server that exposes Samsung **SmartThings Public API** as
 LLM-friendly tools, resources and real-time events.
 
+![Architecture](docs/assets/architecture.svg)
+
 ## Features
 
 * **Lazy Loading**: Tools are discoverable without authentication - only validates API keys when tools are invoked
