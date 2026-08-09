@@ -24,6 +24,7 @@ func main() {
 		Token:       os.Getenv("SMARTTHINGS_TOKEN"),
 		BaseURL:     os.Getenv("ST_BASE_URL"),
 		AccessToken: os.Getenv("MCP_ACCESS_TOKEN"),
+		LocationID:  os.Getenv("SMARTTHINGS_LOCATION_ID"),
 	}
 
 	application, err := app.NewApplication(cfg)
