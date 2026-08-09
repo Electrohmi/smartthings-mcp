@@ -1,0 +1,11 @@
+services:
+  smartthings-mcp:
+    image: ghcr.io/electrohmi/smartthings-mcp:latest
+    container_name: smartthings-mcp
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      SMARTTHINGS_TOKEN: "${SMARTTHINGS_TOKEN:?SmartThings PAT is required}"
+      # ST_BASE_URL: "https://api.smartthings.com"
+      # MCP_LOG_LEVEL: "info"

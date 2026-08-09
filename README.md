@@ -64,6 +64,44 @@ cd smartthings-mcp
 go mod download
 ```
 
+### Container Image (GHCR)
+
+Every push to `main` (and every `vX.Y.Z` tag) is built by [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)
+and published to the GitHub Container Registry as a multi-arch (`linux/amd64`, `linux/arm64`) image:
+
+```
+ghcr.io/electrohmi/smartthings-mcp:latest
+```
+
+Available tags: `latest` (tracks `main`), `vX.Y.Z` / `X.Y` (release tags), and `sha-<short-sha>` (every build).
+
+```bash
+docker pull ghcr.io/electrohmi/smartthings-mcp:latest
+docker run -d --name smartthings-mcp \
+  -p 8081:8081 \
+  -e SMARTTHINGS_TOKEN=123ab456-xxx... \
+  --restart unless-stopped \
+  ghcr.io/electrohmi/smartthings-mcp:latest
+```
+
+### Synology NAS (Container Manager)
+
+To run the server on a Synology NAS via **Container Manager** (DSM 7.2+), pulling the image built above:
+
+1. **Container Manager → Registry**: search `ghcr.io/electrohmi/smartthings-mcp` and download the `latest` tag
+   (or add `ghcr.io` as a custom registry under *Registry → Settings* if it isn't listed by default).
+   If the GHCR package is private, log in first: *Registry → Settings → Add* with your GitHub username and a
+   [PAT with `read:packages` scope](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry) as the password.
+2. **Container Manager → Project**: create a new project, choose *Upload docker-compose.yml*, and upload the
+   [`docker-compose.yml`](docker-compose.yml) from this repo (or paste its contents).
+3. Set the `SMARTTHINGS_TOKEN` environment variable (Container Manager project *Environment* tab, or a `.env`
+   file next to `docker-compose.yml` with `SMARTTHINGS_TOKEN=123ab456-xxx...`), then build/start the project.
+4. The server listens on port `8081` (StreamableHTTP transport) — point your MCP client at
+   `http://<synology-ip>:8081/mcp`.
+
+Alternatively, from an SSH session on the NAS you can run the same `docker pull` / `docker run` commands shown
+above, or `docker compose up -d` using the provided `docker-compose.yml`.
+
 ## Running
 
 ### Stdio
