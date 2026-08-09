@@ -41,3 +41,6 @@ logs/
 *.toml
 
 !smithery.yaml
+!docker-compose.yml
+!.github/**/*.yml
+!.github/**/*.yaml
