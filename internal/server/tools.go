@@ -13,7 +13,7 @@ import (
 // defaultLocationID, when non-empty, restricts every tool to that single
 // SmartThings location: other locations are hidden from list_locations and
 // any attempt to read or command a device/scene/room outside it is rejected.
-func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID string) {
+func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID string, locCache *deviceLocationCache) {
 	// list_devices
 	s.AddTool(&mcp.Tool{
 		Name:        "list_devices",
@@ -54,6 +54,7 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 				},
 			}, nil
 		}
+		locCache.setMany(devices)
 		data, _ := json.Marshal(devices)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -62,6 +63,79 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 					Annotations: &mcp.Annotations{
 						Audience: []mcp.Role{mcp.Role("user"), mcp.Role("assistant")},
 						Priority: 0.8,
+					},
+				},
+			},
+		}, nil
+	})
+
+	// list_devices_with_status
+	s.AddTool(&mcp.Tool{
+		Name: "list_devices_with_status",
+		Description: "List SmartThings devices together with their live status, fetched in parallel server-side. " +
+			"Prefer this over list_devices + get_device_status per device when you need the status of many devices " +
+			"(e.g. 'what lights are on') — it's one round trip instead of one per device.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"location_id": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional location ID to filter devices. If not provided, returns devices from all locations.",
+				},
+			},
+		},
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args map[string]interface{}
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult("invalid arguments"), nil
+		}
+		loc, _ := args["location_id"].(string)
+		loc, err := resolveLocation(loc, defaultLocationID)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+
+		var devices []smartthings.Device
+		if loc != "" {
+			devices, err = client.ListDevicesByLocation(loc)
+		} else {
+			devices, err = client.ListDevices()
+		}
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		locCache.setMany(devices)
+
+		ids := make([]string, len(devices))
+		for i, d := range devices {
+			ids[i] = d.DeviceID
+		}
+		statuses, statusErrs := client.GetDevicesStatusConcurrent(ids, 8)
+
+		type deviceWithStatus struct {
+			smartthings.Device
+			Status      smartthings.DeviceStatus `json:"status,omitempty"`
+			StatusError string                   `json:"statusError,omitempty"`
+		}
+		out := make([]deviceWithStatus, len(devices))
+		for i, d := range devices {
+			dws := deviceWithStatus{Device: d}
+			if st, ok := statuses[d.DeviceID]; ok {
+				dws.Status = st
+			} else if statusErr, ok := statusErrs[d.DeviceID]; ok {
+				dws.StatusError = statusErr.Error()
+			}
+			out[i] = dws
+		}
+
+		data, _ := json.Marshal(out)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: string(data),
+					Annotations: &mcp.Annotations{
+						Audience: []mcp.Role{mcp.Role("user"), mcp.Role("assistant")},
+						Priority: 0.9,
 					},
 				},
 			},
@@ -95,6 +169,7 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}
+		locCache.set(id, d.LocationID)
 		if defaultLocationID != "" && d.LocationID != defaultLocationID {
 			return errorResult("access denied: device is outside the configured SmartThings location"), nil
 		}
@@ -135,7 +210,7 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		if !ok {
 			return errorResult("device_id is required"), nil
 		}
-		if err := checkDeviceLocation(client, defaultLocationID, id); err != nil {
+		if err := checkDeviceLocation(client, locCache, defaultLocationID, id); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		status, err := client.GetDeviceStatus(id)
@@ -183,6 +258,7 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}
+		locCache.set(id, dev.LocationID)
 		if defaultLocationID != "" && dev.LocationID != defaultLocationID {
 			return errorResult("access denied: device is outside the configured SmartThings location"), nil
 		}
@@ -254,7 +330,7 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		command, _ := args["command"].(string)
 		arguments, _ := args["arguments"].([]interface{})
 
-		if err := checkDeviceLocation(client, defaultLocationID, id); err != nil {
+		if err := checkDeviceLocation(client, locCache, defaultLocationID, id); err != nil {
 			return errorResult(err.Error()), nil
 		}
 
@@ -937,7 +1013,7 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 		if deviceID == "" {
 			return errorResult("device_id is required"), nil
 		}
-		if err := checkDeviceLocation(client, defaultLocationID, deviceID); err != nil {
+		if err := checkDeviceLocation(client, locCache, defaultLocationID, deviceID); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		history, err := client.GetDeviceHistory(deviceID)
@@ -1006,16 +1082,26 @@ func resolveLocation(provided, configured string) (string, error) {
 	return configured, nil
 }
 
-// checkDeviceLocation fetches the device and rejects it if it falls outside
-// the configured default location. It is a no-op when no default is set.
-func checkDeviceLocation(client *smartthings.Client, configured, deviceID string) error {
+// checkDeviceLocation rejects a device that falls outside the configured
+// default location. It is a no-op when no default is set. The device's
+// location is looked up from cache when available (populated by
+// list_devices/list_devices_with_status); only on a cache miss does it cost
+// an extra SmartThings API round trip.
+func checkDeviceLocation(client *smartthings.Client, cache *deviceLocationCache, configured, deviceID string) error {
 	if configured == "" {
+		return nil
+	}
+	if locID, ok := cache.get(deviceID); ok {
+		if locID != configured {
+			return fmt.Errorf("access denied: device is outside the configured SmartThings location")
+		}
 		return nil
 	}
 	dev, err := client.GetDevice(deviceID)
 	if err != nil {
 		return err
 	}
+	cache.set(deviceID, dev.LocationID)
 	if dev.LocationID != configured {
 		return fmt.Errorf("access denied: device is outside the configured SmartThings location")
 	}
