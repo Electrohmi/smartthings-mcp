@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
 
@@ -24,11 +26,17 @@ func NewMCPServer(logger *zap.SugaredLogger, client *smartthings.Client, default
 		HasPrompts:   true,
 	})
 
+	// Caches which location each device belongs to for this session, so
+	// checkDeviceLocation doesn't need an extra SmartThings API round trip
+	// for every location-scoped device lookup once the device has already
+	// been seen via list_devices/list_devices_with_status.
+	locCache := newDeviceLocationCache(5 * time.Minute)
+
 	// Register tools
-	RegisterTools(s, client, defaultLocationID)
+	RegisterTools(s, client, defaultLocationID, locCache)
 
 	// Register resources
-	RegisterResources(s, client, defaultLocationID)
+	RegisterResources(s, client, defaultLocationID, locCache)
 
 	// Register prompts
 	RegisterPrompts(s)

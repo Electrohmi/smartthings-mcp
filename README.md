@@ -11,7 +11,7 @@ LLM-friendly tools, resources and real-time events.
 
 * **Lazy Loading**: Tools are discoverable without authentication - only validates API keys when tools are invoked
 * Wraps common SmartThings operations as **MCP Tools**
-  * **Devices**: `list_devices`, `get_device`, `get_device_status`, `list_device_capabilities`, `send_device_command`
+  * **Devices**: `list_devices`, `list_devices_with_status`, `get_device`, `get_device_status`, `list_device_capabilities`, `send_device_command`
   * **Locations & Rooms**: `list_locations`, `list_rooms`, `create_room`, `delete_room`
   * **Scenes & Rules**: `list_scenes`, `execute_scene`, `list_rules`
   * **Hubs**: `list_hubs`, `get_hub_health`
@@ -197,6 +197,7 @@ The server emits `smartthings/device_status` notifications every 30 seconds.
 | Tool | Params | Description |
 |------|--------|-------------|
 | `list_devices` | `location_id?` | List user devices |
+| `list_devices_with_status` | `location_id?` | List devices with live status, fetched in parallel — use this instead of `list_devices` + `get_device_status` per device when asking about many devices at once (e.g. "what lights are on"); one round trip instead of one per device |
 | `get_device` | `device_id` | Device metadata |
 | `get_device_status` | `device_id` | Live status |
 | `list_device_capabilities` | `device_id` | Supported capabilities |

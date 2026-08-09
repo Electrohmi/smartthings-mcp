@@ -15,7 +15,7 @@ import (
 // RegisterResources registers SmartThings resources (devices, status, locations)
 // and wires them into the MCP server. defaultLocationID, when non-empty,
 // applies the same single-location scoping as RegisterTools.
-func RegisterResources(s *mcp.Server, client *smartthings.Client, defaultLocationID string) {
+func RegisterResources(s *mcp.Server, client *smartthings.Client, defaultLocationID string, locCache *deviceLocationCache) {
 	const mimeJSON = "application/json"
 
 	// Simple cache keyed by URI → cacheEntry
@@ -75,6 +75,7 @@ func RegisterResources(s *mcp.Server, client *smartthings.Client, defaultLocatio
 		if err != nil {
 			return nil, err
 		}
+		locCache.set(deviceID, d.LocationID)
 		if defaultLocationID != "" && d.LocationID != defaultLocationID {
 			return nil, fmt.Errorf("access denied: device is outside the configured SmartThings location")
 		}
@@ -100,7 +101,7 @@ func RegisterResources(s *mcp.Server, client *smartthings.Client, defaultLocatio
 		if err != nil {
 			return nil, err
 		}
-		if err := checkDeviceLocation(client, defaultLocationID, deviceID); err != nil {
+		if err := checkDeviceLocation(client, locCache, defaultLocationID, deviceID); err != nil {
 			return nil, err
 		}
 		status, err := client.GetDeviceStatus(deviceID)

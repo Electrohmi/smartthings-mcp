@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -105,6 +106,53 @@ func (c *Client) GetDeviceStatus(id string) (DeviceStatus, error) {
 		return nil, err
 	}
 	return status, nil
+}
+
+// GetDevicesStatusConcurrent fetches status for multiple devices in
+// parallel, bounded by maxConcurrency (defaults to 8), instead of the
+// caller issuing one sequential get_device_status round trip per device.
+// Devices whose status fetch fails are reported in the errs map rather than
+// aborting the whole batch.
+func (c *Client) GetDevicesStatusConcurrent(deviceIDs []string, maxConcurrency int) (statuses map[string]DeviceStatus, errs map[string]error) {
+	if maxConcurrency <= 0 {
+		maxConcurrency = 8
+	}
+
+	type result struct {
+		id     string
+		status DeviceStatus
+		err    error
+	}
+
+	sem := make(chan struct{}, maxConcurrency)
+	results := make(chan result, len(deviceIDs))
+	var wg sync.WaitGroup
+
+	for _, id := range deviceIDs {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			status, err := c.GetDeviceStatus(id)
+			results <- result{id: id, status: status, err: err}
+		}(id)
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	statuses = make(map[string]DeviceStatus, len(deviceIDs))
+	errs = make(map[string]error)
+	for r := range results {
+		if r.err != nil {
+			errs[r.id] = r.err
+		} else {
+			statuses[r.id] = r.status
+		}
+	}
+	return statuses, errs
 }
 
 // SendDeviceCommand issues a command.
