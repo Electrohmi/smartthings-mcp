@@ -16,20 +16,44 @@ const (
 // Client is a minimal SmartThings REST API client.
 // It is **not** feature-complete—only endpoints needed by the MCP server.
 
-type Client struct {
-	token   string
-	baseURL string
-	http    *http.Client
+// TokenSource supplies the bearer token for each API call. Implementations
+// may return a fixed value (a personal access token) or manage a live
+// OAuth2 access/refresh token pair (see OAuthTokenSource).
+type TokenSource interface {
+	Token() (string, error)
 }
 
-// NewClient returns a new SmartThings API client.
+// staticToken is a TokenSource that always returns the same value — used
+// for the legacy SMARTTHINGS_TOKEN (personal access token) flow.
+type staticToken string
+
+func (s staticToken) Token() (string, error) { return string(s), nil }
+
+type Client struct {
+	tokenSource TokenSource
+	baseURL     string
+	http        *http.Client
+}
+
+// NewClient returns a new SmartThings API client authenticated with a
+// static token (a personal access token). Personal access tokens issued
+// after 2024-12-30 expire after 24 hours; for anything long-running, use
+// NewClientWithTokenSource with an OAuthTokenSource instead.
 func NewClient(token, baseURL string) *Client {
+	return NewClientWithTokenSource(staticToken(token), baseURL)
+}
+
+// NewClientWithTokenSource returns a new SmartThings API client that pulls
+// its bearer token from ts on every request, allowing the token to be
+// rotated (e.g. by an OAuthTokenSource's background refresh) without
+// re-creating the client.
+func NewClientWithTokenSource(ts TokenSource, baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = BaseURL
 	}
 	return &Client{
-		token:   token,
-		baseURL: baseURL,
+		tokenSource: ts,
+		baseURL:     baseURL,
 		http: &http.Client{
 			Timeout: 15 * time.Second,
 		},
@@ -442,17 +466,31 @@ func (c *Client) GetCapability(capabilityID string, version int) (*CapabilityDef
 }
 
 // Helpers
+func (c *Client) token() (string, error) {
+	if c.tokenSource == nil {
+		return "", fmt.Errorf("SmartThings token not configured. Please set the SMARTTHINGS_TOKEN (or SMARTTHINGS_CLIENT_ID/SMARTTHINGS_CLIENT_SECRET for OAuth) environment variable")
+	}
+	token, err := c.tokenSource.Token()
+	if err != nil {
+		return "", fmt.Errorf("SmartThings token unavailable: %w", err)
+	}
+	if token == "" {
+		return "", fmt.Errorf("SmartThings token not configured. Please set the SMARTTHINGS_TOKEN (or SMARTTHINGS_CLIENT_ID/SMARTTHINGS_CLIENT_SECRET for OAuth) environment variable")
+	}
+	return token, nil
+}
+
 func (c *Client) get(path string, out interface{}) error {
-	// Check if token is configured before making API calls
-	if c.token == "" {
-		return fmt.Errorf("SmartThings token not configured. Please set the SMARTTHINGS_TOKEN environment variable")
+	token, err := c.token()
+	if err != nil {
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	res, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("API request failed: %w", err)
@@ -465,9 +503,9 @@ func (c *Client) get(path string, out interface{}) error {
 }
 
 func (c *Client) post(path string, body interface{}, out interface{}) error {
-	// Check if token is configured before making API calls
-	if c.token == "" {
-		return fmt.Errorf("SmartThings token not configured. Please set the SMARTTHINGS_TOKEN environment variable")
+	token, err := c.token()
+	if err != nil {
+		return err
 	}
 
 	var buf *bytes.Buffer
@@ -484,7 +522,7 @@ func (c *Client) post(path string, body interface{}, out interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.http.Do(req)
 	if err != nil {
@@ -501,16 +539,16 @@ func (c *Client) post(path string, body interface{}, out interface{}) error {
 }
 
 func (c *Client) delete(path string) error {
-	// Check if token is configured before making API calls
-	if c.token == "" {
-		return fmt.Errorf("SmartThings token not configured. Please set the SMARTTHINGS_TOKEN environment variable")
+	token, err := c.token()
+	if err != nil {
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodDelete, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	res, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("API request failed: %w", err)

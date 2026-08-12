@@ -28,9 +28,19 @@ LLM-friendly tools, resources and real-time events.
 ## Requirements
 
 * Go ≥ 1.23
-* A valid **SmartThings PAT** (Personal Access Token)
+* Either a **SmartThings PAT** (Personal Access Token) or an **OAuth2** app — see below
+
+> **PATs issued after 2024-12-30 expire after 24 hours.** SmartThings [changed this
+> policy](https://developer.smartthings.com/docs/getting-started/authorization-and-permissions)
+> to push long-running integrations toward OAuth2; PATs created before that date can still be
+> valid for up to 50 years, but any PAT you generate today won't outlive the day. For anything
+> other than short-lived local testing, use [OAuth2](#oauth2-setup-recommended-for-always-on-use)
+> instead — it refreshes itself automatically and doesn't expire.
 
 ### Getting a Personal Access Token (PAT)
+
+Fine for quick local testing (`stdio`, or a `stream`/`sse` server you don't mind re-authenticating
+daily) — for an always-on deployment, skip to [OAuth2 Setup](#oauth2-setup-recommended-for-always-on-use).
 
 1. Go to [SmartThings Personal Access Tokens](https://account.smartthings.com/tokens).
 2. Log in with your Samsung Account.
@@ -38,12 +48,49 @@ LLM-friendly tools, resources and real-time events.
 4. Enter a name for your token and select the authorized scopes (e.g., `devices`, `locations`, `scenes`, `rules`, `schedules`).
 5. Click **Generate token**.
 6. **Copy and save** the token immediately (it won't be shown again).
+7. Set it as `SMARTTHINGS_TOKEN`.
+
+### OAuth2 Setup (recommended for always-on use)
+
+Unlike a PAT, this keeps working indefinitely: the server refreshes its access token
+automatically in the background and persists the (rotating) refresh token to disk. The one-time
+cost is a few minutes of setup and one browser-based consent click.
+
+1. **Register a SmartApp** in the [SmartThings developer workspace](https://smartthings.developer.samsung.com/workspace/):
+   *Create App* → **API Only** (no webhook target needed) → give it a name (e.g. "smartthings-mcp") →
+   under **OAuth**, add a redirect URI of `<your public server URL>/oauth/callback`
+   (e.g. `https://electrohmi.synology.me/smartthings/oauth/callback` if proxied the same way as
+   the main MCP endpoint) and select these scopes: `r:devices:*`, `x:devices:*`, `r:locations:*`,
+   `r:scenes:*`, `x:scenes:*`, `r:rules:*`, `w:rules:*`, `r:hubs:*` (match whatever this server's
+   tool set actually needs — see [Environment Variables](#environment-variables) if that list has
+   grown). Save, then copy the generated **Client ID** and **Client Secret**.
+2. Set `SMARTTHINGS_CLIENT_ID`, `SMARTTHINGS_CLIENT_SECRET`, and `SMARTTHINGS_REDIRECT_URI` (the
+   exact same redirect URI registered above) — **leave `SMARTTHINGS_TOKEN` unset**, it's ignored
+   once OAuth is configured. Make sure `/data` (or wherever `SMARTTHINGS_TOKEN_STORE_PATH` points)
+   is a persistent volume — `docker-compose.yml` already mounts one — so the refresh token
+   survives a container restart.
+3. Start (or restart) the server, then visit `<your public server URL>/oauth/authorize` once in a
+   browser. It redirects to SmartThings' own login-gated consent screen; approve it, and you're
+   redirected back to `/oauth/callback`, which exchanges the code for tokens and stores them.
+   Server logs will confirm with `SmartThings OAuth: authorization complete, token stored`.
+4. That's it — no further action needed. The server refreshes the access token in the background
+   well before each ~24h expiry, and the (rotating) refresh token is written back to the token
+   store on every refresh.
+
+`/oauth/authorize` and `/oauth/callback` are exempt from the `MCP_ACCESS_TOKEN` gate (SmartThings'
+own redirect can't carry it), but neither endpoint exposes device data — `/oauth/authorize` just
+redirects to SmartThings' consent screen, and `/oauth/callback` is protected by a one-time
+state+code exchange.
 
 ## Environment Variables
 
 | Name | Default | Description |
 |------|---------|-------------|
-| `smartThingsToken`, `SMARTTHINGS_TOKEN` | – | Bearer token for SmartThings API. **Required for SmartThings operations**, but server will start without it for tool discovery |
+| `smartThingsToken`, `SMARTTHINGS_TOKEN` | – | Bearer token for SmartThings API (a personal access token — see the 24h-expiry note above). Ignored when `SMARTTHINGS_CLIENT_ID` is set. Server starts without it for tool discovery, but calls fail until one auth method is configured |
+| `SMARTTHINGS_CLIENT_ID` | – | OAuth2 client ID from a registered SmartApp. Set together with `SMARTTHINGS_CLIENT_SECRET` and `SMARTTHINGS_REDIRECT_URI` to use OAuth instead of a PAT — see [OAuth2 Setup](#oauth2-setup-recommended-for-always-on-use) |
+| `SMARTTHINGS_CLIENT_SECRET` | – | OAuth2 client secret from the same SmartApp. Keep this as secret as `MCP_ACCESS_TOKEN` |
+| `SMARTTHINGS_REDIRECT_URI` | – | Must exactly match the redirect URI registered on the SmartApp, e.g. `https://your-domain/smartthings/oauth/callback`. Required when `SMARTTHINGS_CLIENT_ID` is set |
+| `SMARTTHINGS_TOKEN_STORE_PATH` | `/data/smartthings-oauth.json` | Where the OAuth access/refresh token pair is persisted. Must be on a volume that survives container restarts (see `docker-compose.yml`) |
 | `stBaseUrl`, `ST_BASE_URL` | `https://api.smartthings.com` | Override for testing / mock servers |
 | `MCP_ACCESS_TOKEN` | – | Shared secret that gates the **SSE**/**StreamableHTTP** endpoints. If set, every request must supply it via the `mcpAccessToken` query parameter or an `Authorization: Bearer` header, or it's rejected with `401`. **Strongly recommended whenever the server is reachable from outside your LAN** — without it, anyone who can reach the URL can control your devices using the token baked into the container. Not used by `stdio`. |
 | `SMARTTHINGS_LOCATION_ID` | – | Restricts every tool and resource to a single SmartThings location (find IDs via `list_locations`). If your account has multiple homes, set this so the server can only see/control devices, scenes, and rooms in that one location — `list_locations` itself only returns the configured location, and any device/scene/room ID outside it is rejected. Fixed server-side config only; it cannot be overridden via a request, even on `sse`/`stream`. |

@@ -5,9 +5,23 @@ services:
     restart: unless-stopped
     ports:
       - "8081:8081"
+    volumes:
+      # Persists the OAuth refresh token across restarts. Only needed if
+      # you use the OAuth vars below instead of SMARTTHINGS_TOKEN.
+      - ./data:/data
     environment:
-      SMARTTHINGS_TOKEN: "${SMARTTHINGS_TOKEN:?SmartThings PAT is required}"
       MCP_ACCESS_TOKEN: "${MCP_ACCESS_TOKEN:?Shared secret required to reach the endpoint - generate one with `openssl rand -hex 32`}"
+      # --- Auth: use ONE of the two options below ---
+      # Option A: a personal access token (PATs issued after 2024-12-30
+      # expire after 24h — fine for quick testing, not for always-on use).
+      SMARTTHINGS_TOKEN: "${SMARTTHINGS_TOKEN:-}"
+      # Option B: OAuth2 (recommended for continuous use). Requires
+      # registering a SmartApp in the SmartThings developer workspace first
+      # — see README's OAuth section. Leave SMARTTHINGS_TOKEN empty above
+      # when using this.
+      # SMARTTHINGS_CLIENT_ID: "..."
+      # SMARTTHINGS_CLIENT_SECRET: "..."
+      # SMARTTHINGS_REDIRECT_URI: "https://electrohmi.synology.me/smartthings/oauth/callback"
       # ST_BASE_URL: "https://api.smartthings.com"
       # MCP_LOG_LEVEL: "info"
       # SMARTTHINGS_LOCATION_ID: "f607eac4-1336-4eae-9c75-1b8ae24e5e31"
