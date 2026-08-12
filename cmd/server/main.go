@@ -25,6 +25,11 @@ func main() {
 		BaseURL:     os.Getenv("ST_BASE_URL"),
 		AccessToken: os.Getenv("MCP_ACCESS_TOKEN"),
 		LocationID:  os.Getenv("SMARTTHINGS_LOCATION_ID"),
+
+		ClientID:       os.Getenv("SMARTTHINGS_CLIENT_ID"),
+		ClientSecret:   os.Getenv("SMARTTHINGS_CLIENT_SECRET"),
+		RedirectURI:    os.Getenv("SMARTTHINGS_REDIRECT_URI"),
+		TokenStorePath: envOrDefault("SMARTTHINGS_TOKEN_STORE_PATH", "/data/smartthings-oauth.json"),
 	}
 
 	application, err := app.NewApplication(cfg)
@@ -39,4 +44,11 @@ func main() {
 	}
 
 	application.Wait()
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
