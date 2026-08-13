@@ -91,11 +91,47 @@ type Location struct {
 
 // Scene represents a SmartThings scene.
 type Scene struct {
-	SceneID          string    `json:"sceneId"`
-	SceneName        string    `json:"sceneName"`
-	LocationID       string    `json:"locationId"`
-	CreatedDate      time.Time `json:"createdDate"`
-	LastExecutedDate time.Time `json:"lastExecutedDate"`
+	SceneID          string   `json:"sceneId"`
+	SceneName        string   `json:"sceneName"`
+	LocationID       string   `json:"locationId"`
+	CreatedDate      flexTime `json:"createdDate"`
+	LastExecutedDate flexTime `json:"lastExecutedDate"`
+}
+
+// flexTime unmarshals a SmartThings date field that may come back as an
+// RFC3339 string (the documented format), a bare epoch-millisecond number
+// (observed on some scenes, likely ones that have migrated to routines
+// under the hood), or null/omitted (left as the zero value). The stock
+// encoding/json time.Time only accepts the first case and errors on the
+// others with "Time.UnmarshalJSON: input is not a JSON string", which was
+// enough to fail decoding the entire scene list as soon as one such entry
+// showed up.
+type flexTime time.Time
+
+func (t *flexTime) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	if s == "null" || s == `""` {
+		*t = flexTime(time.Time{})
+		return nil
+	}
+	if len(s) > 0 && s[0] == '"' {
+		var parsed time.Time
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return err
+		}
+		*t = flexTime(parsed)
+		return nil
+	}
+	var ms int64
+	if err := json.Unmarshal(data, &ms); err != nil {
+		return fmt.Errorf("flexTime: unsupported value %s: %w", s, err)
+	}
+	*t = flexTime(time.UnixMilli(ms))
+	return nil
+}
+
+func (t flexTime) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Time(t))
 }
 
 // GetLocation returns metadata for a single location by ID.
