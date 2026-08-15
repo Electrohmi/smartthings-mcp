@@ -460,24 +460,29 @@ func (c *Client) DeleteSchedule(installedAppID, scheduleID string) error {
 	return c.delete(fmt.Sprintf("/v1/installedapps/%s/schedules/%s", installedAppID, scheduleID))
 }
 
-// DeviceEvent represents a single event in history.
-type DeviceEvent struct {
-	Date       time.Time   `json:"date"`
-	DeviceID   string      `json:"deviceId"`
-	Component  string      `json:"component"`
-	Capability string      `json:"capability"`
-	Attribute  string      `json:"attribute"`
-	Value      interface{} `json:"value"`
-	Unit       string      `json:"unit,omitempty"`
-}
-
-// GetDeviceHistory returns event history for a device.
-func (c *Client) GetDeviceHistory(deviceID string) ([]DeviceEvent, error) {
-	var resp struct {
-		Items []DeviceEvent `json:"items"`
+// GetDeviceHistory returns recent event history for a device via
+// SmartThings' history API. Unlike most other endpoints this lives at
+// /v1/history/devices (not /v1/devices/{id}/history — that path doesn't
+// exist and was returning 406 on every call) and requires locationId as a
+// query parameter alongside deviceId, so the device is looked up first to
+// resolve it. Note SmartThings only makes the last 7 days of history
+// queryable regardless of limit.
+//
+// The exact response shape isn't nailed down by a documented Go type here
+// (unlike the other endpoints in this file) since this endpoint has never
+// successfully returned real data to verify field names against — decoding
+// into a generic map avoids silently dropping fields we guessed wrong,
+// unlike a struct that happens to compile but doesn't match reality.
+func (c *Client) GetDeviceHistory(deviceID string) ([]map[string]interface{}, error) {
+	dev, err := c.GetDevice(deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve device's location for history: %w", err)
 	}
-	// Limit to recent 20 events for simplicity
-	if err := c.get(fmt.Sprintf("/v1/devices/%s/history?limit=20", deviceID), &resp); err != nil {
+	var resp struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	path := fmt.Sprintf("/v1/history/devices?locationId=%s&deviceId=%s&limit=20", dev.LocationID, deviceID)
+	if err := c.get(path, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Items, nil
