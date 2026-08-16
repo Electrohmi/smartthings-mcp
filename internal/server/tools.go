@@ -78,7 +78,8 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 			"(e.g. 'what lights are on') — it's one round trip instead of one per device. Pass 'category' (and/or " +
 			"'capability') to narrow which devices are included whenever you only care about one kind of device — " +
 			"on accounts with many devices or complex appliances, fetching status for everything is slow and can " +
-			"produce a very large response.",
+			"produce a very large response. Any timestamp in the status (e.g. a washer/dryer's completionTime) is " +
+			"UTC — convert to the location's timeZoneId (from list_locations) before telling a user a time.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -228,8 +229,10 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 
 	// get_device_status
 	s.AddTool(&mcp.Tool{
-		Name:        "get_device_status",
-		Description: "Get SmartThings device status",
+		Name: "get_device_status",
+		Description: "Get SmartThings device status. Any timestamp in the response (e.g. a washer/dryer's " +
+			"completionTime) is UTC — convert to the location's timeZoneId (from list_locations) before telling " +
+			"a user a time.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -401,8 +404,10 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 
 	// list_locations
 	s.AddTool(&mcp.Tool{
-		Name:        "list_locations",
-		Description: "List SmartThings locations",
+		Name: "list_locations",
+		Description: "List SmartThings locations, including each location's timeZoneId (e.g. \"Asia/Seoul\"). " +
+			"Every timestamp elsewhere in this API (device status/history, scene dates, etc.) is UTC — use the " +
+			"relevant location's timeZoneId to convert to local time before telling a user a time.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 		},
@@ -1031,8 +1036,10 @@ func RegisterTools(s *mcp.Server, client *smartthings.Client, defaultLocationID 
 
 	// get_device_history
 	s.AddTool(&mcp.Tool{
-		Name:        "get_device_history",
-		Description: "Get recent event history for a device",
+		Name: "get_device_history",
+		Description: "Get recent event history for a device (only the last 7 days are queryable). Timestamps in " +
+			"the response are UTC — convert to the location's timeZoneId (from list_locations) before telling a " +
+			"user a time.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

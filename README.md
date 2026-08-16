@@ -249,7 +249,7 @@ The server emits `smartthings/device_status` notifications every 30 seconds.
 | `get_device_status` | `device_id` | Live status |
 | `list_device_capabilities` | `device_id` | Supported capabilities |
 | `send_device_command` | `device_id`, `component`, `capability`, `command`, `arguments?[]` | Issue command |
-| `list_locations` | – | List locations |
+| `list_locations` | – | List locations, including each location's `timeZoneId` (e.g. `Asia/Seoul`) — **every timestamp elsewhere in this API (device status/history, scene dates) is UTC**, so this is what an assistant should use to convert to local time before telling a user a time |
 | `list_rooms` | `location_id` | List rooms in a location |
 | `create_room` | `location_id`, `name` | Create a new room |
 | `delete_room` | `location_id`, `room_id` | Delete a room |

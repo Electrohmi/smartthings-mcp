@@ -87,6 +87,11 @@ type Device struct {
 type Location struct {
 	LocationID string `json:"locationId"`
 	Name       string `json:"name"`
+	// TimeZoneID (e.g. "Asia/Seoul") is the location's configured timezone.
+	// Every timestamp value elsewhere in the SmartThings API (device
+	// status/history, scene dates, etc.) is UTC — use this to convert to
+	// local time before presenting it to a user.
+	TimeZoneID string `json:"timeZoneId,omitempty"`
 }
 
 // Scene represents a SmartThings scene.
